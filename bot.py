@@ -8,7 +8,7 @@ import re
 import subprocess
 
 import config
-from config import VIOLATION_MUTE_THRESHOLD, WELCOME_MSG, WELCOME_FILE, DATA_DIR
+from config import VIOLATION_MUTE_THRESHOLD, WELCOME_MSG, WELCOME_FILE, DATA_DIR, GIT_MIRROR
 from plugins import sign_in, group_manage, violation, exchange
 
 
@@ -321,12 +321,28 @@ async def on_group_message(ws, event):
     if cmd == "更新":
         await group_manage.send_group_msg(ws, group_id, "正在拉取最新代码...")
         try:
-            result = subprocess.run(
-                ["git", "pull"],
-                cwd=os.path.dirname(os.path.abspath(__file__)),
-                capture_output=True, text=True, timeout=30
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            # 先获取远程仓库 URL
+            url_result = subprocess.run(
+                ["git", "remote", "get-url", "origin"],
+                cwd=base_dir, capture_output=True, text=True, timeout=10
             )
-            output = result.stdout.strip() or result.stderr.strip()
+            remote_url = url_result.stdout.strip()
+            # 拼接镜像 URL
+            if GIT_MIRROR and remote_url:
+                mirror_url = GIT_MIRROR + remote_url
+            else:
+                mirror_url = remote_url
+            # 通过镜像 fetch 并 merge
+            subprocess.run(
+                ["git", "fetch", mirror_url, "master"],
+                cwd=base_dir, capture_output=True, text=True, timeout=60
+            )
+            merge_result = subprocess.run(
+                ["git", "merge", "FETCH_HEAD", "--ff-only"],
+                cwd=base_dir, capture_output=True, text=True, timeout=30
+            )
+            output = merge_result.stdout.strip() or merge_result.stderr.strip()
             await group_manage.send_group_msg(ws, group_id, f"更新结果:\n{output}\n\n即将重启，请稍等...")
         except Exception as e:
             await group_manage.send_group_msg(ws, group_id, f"更新失败: {e}")

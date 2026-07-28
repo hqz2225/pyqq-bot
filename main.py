@@ -12,7 +12,7 @@ import sys
 
 import websockets
 
-from config import WS_URL, AUTO_GROUP_ID, UPDATE_CHECK_MINUTES, DATA_DIR
+from config import WS_URL, AUTO_GROUP_ID, UPDATE_CHECK_MINUTES, DATA_DIR, GIT_MIRROR
 from bot import handle_event
 from plugins.group_manage import send_group_msg
 
@@ -53,17 +53,29 @@ def _save_last_commit(hash_val):
 def _get_remote_hash():
     """获取 origin/master 最新 commit hash, 失败返回 None"""
     try:
-        # 先 fetch
-        subprocess.run(
-            ["git", "fetch", "origin"],
-            capture_output=True, timeout=20,
-            cwd=os.path.dirname(os.path.abspath(__file__)),
-        )
-        # 获取 remote hash
-        result = subprocess.run(
-            ["git", "rev-parse", "origin/master"],
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        # 获取 origin URL
+        url_result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
             capture_output=True, text=True, timeout=10,
-            cwd=os.path.dirname(os.path.abspath(__file__)),
+            cwd=base_dir,
+        )
+        remote_url = url_result.stdout.strip()
+        if GIT_MIRROR and remote_url:
+            mirror_url = GIT_MIRROR + remote_url
+        else:
+            mirror_url = remote_url
+        # 通过镜像 fetch
+        subprocess.run(
+            ["git", "fetch", mirror_url, "master"],
+            capture_output=True, timeout=30,
+            cwd=base_dir,
+        )
+        # 获取 FETCH_HEAD 的 hash
+        result = subprocess.run(
+            ["git", "rev-parse", "FETCH_HEAD"],
+            capture_output=True, text=True, timeout=10,
+            cwd=base_dir,
         )
         return result.stdout.strip()
     except Exception:
@@ -74,7 +86,7 @@ def _get_commit_summary():
     """获取本地落后于 remote 的 commit 摘要"""
     try:
         result = subprocess.run(
-            ["git", "log", "HEAD..origin/master", "--oneline", "-n", "5"],
+            ["git", "log", "HEAD..FETCH_HEAD", "--oneline", "-n", "5"],
             capture_output=True, text=True, timeout=10,
             cwd=os.path.dirname(os.path.abspath(__file__)),
         )
