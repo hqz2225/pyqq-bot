@@ -5,13 +5,16 @@ PyQQ Bot - 基于 NapCat OneBot v11 WebSocket 的 QQ 群管理机器人
 import asyncio
 import json
 import logging
+import os
 import signal
+import subprocess
 import sys
 
 import websockets
 
-from config import WS_URL
+from config import WS_URL, NOTIFY_GROUP_IDS, UPDATE_CHECK_MINUTES, DATA_DIR
 from bot import handle_event
+from plugins.group_manage import send_group_msg
 
 # 日志配置
 logging.basicConfig(
@@ -22,8 +25,97 @@ logging.basicConfig(
 logger = logging.getLogger("PyQQBot")
 
 # 重连配置
-RECONNECT_DELAY = 5      # 重连间隔(秒)
-MAX_RECONNECT_DELAY = 60  # 最大重连间隔(秒)
+RECONNECT_DELAY = 5
+MAX_RECONNECT_DELAY = 60
+
+# 共享 WebSocket 引用 (供更新检查器使用)
+_ws_ref = [None]
+
+# 记录上次 commit 的文件
+_LAST_COMMIT_FILE = os.path.join(DATA_DIR, "last_commit.txt")
+
+
+def _get_last_commit():
+    """获取本地记录的 commit hash"""
+    os.makedirs(DATA_DIR, exist_ok=True)
+    if os.path.exists(_LAST_COMMIT_FILE):
+        with open(_LAST_COMMIT_FILE, "r") as f:
+            return f.read().strip()
+    return None
+
+
+def _save_last_commit(hash_val):
+    os.makedirs(DATA_DIR, exist_ok=True)
+    with open(_LAST_COMMIT_FILE, "w") as f:
+        f.write(hash_val)
+
+
+def _get_remote_hash():
+    """获取 origin/master 最新 commit hash, 失败返回 None"""
+    try:
+        # 先 fetch
+        subprocess.run(
+            ["git", "fetch", "origin"],
+            capture_output=True, timeout=20,
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+        )
+        # 获取 remote hash
+        result = subprocess.run(
+            ["git", "rev-parse", "origin/master"],
+            capture_output=True, text=True, timeout=10,
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+        )
+        return result.stdout.strip()
+    except Exception:
+        return None
+
+
+def _get_commit_summary():
+    """获取本地落后于 remote 的 commit 摘要"""
+    try:
+        result = subprocess.run(
+            ["git", "log", "HEAD..origin/master", "--oneline", "-n", "5"],
+            capture_output=True, text=True, timeout=10,
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+        )
+        return result.stdout.strip()
+    except Exception:
+        return ""
+
+
+async def check_updates():
+    """后台任务: 定期检查 GitHub 更新并通知"""
+    # 首次启动记录当前 commit, 不通知
+    current = _get_remote_hash()
+    if current and not _get_last_commit():
+        _save_last_commit(current)
+        logger.info(f"更新检查器已就绪, 当前版本: {current[:8]}")
+
+    while True:
+        await asyncio.sleep(UPDATE_CHECK_MINUTES * 60)
+
+        if not NOTIFY_GROUP_IDS:
+            continue
+
+        ws = _ws_ref[0]
+        if ws is None:
+            continue
+
+        remote_hash = _get_remote_hash()
+        if not remote_hash:
+            continue
+
+        last_hash = _get_last_commit()
+        if last_hash and remote_hash != last_hash:
+            summary = _get_commit_summary()
+            msg = f"检测到新版本更新!\n\n更新内容:\n{summary}\n\n发送 更新 即可升级"
+            for gid in NOTIFY_GROUP_IDS:
+                try:
+                    await send_group_msg(ws, gid, msg)
+                except Exception as e:
+                    logger.error(f"发送更新通知到群 {gid} 失败: {e}")
+            _save_last_commit(remote_hash)
+            logger.info(f"已发送更新通知, 新版本: {remote_hash[:8]}")
 
 
 async def connect_ws():
@@ -38,19 +130,15 @@ async def connect_ws():
                 ping_interval=30,
                 ping_timeout=10,
                 close_timeout=5,
-                max_size=10 * 1024 * 1024,  # 10MB
+                max_size=10 * 1024 * 1024,
             ) as ws:
                 logger.info("已成功连接到 NapCat WebSocket!")
-                delay = RECONNECT_DELAY  # 重置重连延迟
+                delay = RECONNECT_DELAY
+                _ws_ref[0] = ws  # 更新共享引用
 
-                # 消息循环
                 async for raw_message in ws:
                     try:
                         event = json.loads(raw_message)
-                        # 调试日志: 打印群消息的格式
-                        if event.get("post_type") == "message" and event.get("message_type") == "group":
-                            msg = event.get("message", "")
-                            logger.info(f"收到群消息 | type={type(msg).__name__} | msg={str(msg)[:200]}")
                         asyncio.create_task(handle_event(ws, event))
                     except json.JSONDecodeError as e:
                         logger.error(f"JSON 解析失败: {e}")
@@ -66,8 +154,9 @@ async def connect_ws():
             break
         except Exception as e:
             logger.error(f"未知错误: {e}")
+        finally:
+            _ws_ref[0] = None
 
-        # 重连逻辑
         logger.info(f"{delay} 秒后重连...")
         await asyncio.sleep(delay)
         delay = min(delay * 2, MAX_RECONNECT_DELAY)
@@ -78,7 +167,6 @@ async def main():
     logger.info("PyQQ Bot 启动中...")
     logger.info(f"WebSocket 地址: {WS_URL}")
 
-    # 捕获退出信号
     loop = asyncio.get_running_loop()
     stop_event = asyncio.Event()
 
@@ -90,17 +178,23 @@ async def main():
         try:
             loop.add_signal_handler(sig, signal_handler)
         except NotImplementedError:
-            # Windows 不支持 add_signal_handler
             signal.signal(sig, lambda s, f: stop_event.set())
 
-    # 启动 WebSocket 连接任务
+    # 启动 WebSocket 连接
     ws_task = asyncio.create_task(connect_ws())
 
-    # 等待退出信号
+    # 启动更新检查器
+    update_task = asyncio.create_task(check_updates())
+
     await stop_event.wait()
     ws_task.cancel()
+    update_task.cancel()
     try:
         await ws_task
+    except asyncio.CancelledError:
+        pass
+    try:
+        await update_task
     except asyncio.CancelledError:
         pass
 

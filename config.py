@@ -43,3 +43,10 @@ VIOLATION_MUTE_THRESHOLD = 3
 
 # 违禁词检测时是否忽略大小写
 BANNED_WORD_IGNORE_CASE = True
+
+# ========== 版本更新通知 ==========
+# 通知到哪些群 (填群号)
+NOTIFY_GROUP_IDS = []
+
+# 检查更新间隔 (分钟)
+UPDATE_CHECK_MINUTES = 10
