@@ -47,6 +47,10 @@ async def connect_ws():
                 async for raw_message in ws:
                     try:
                         event = json.loads(raw_message)
+                        # 调试日志: 打印群消息的格式
+                        if event.get("post_type") == "message" and event.get("message_type") == "group":
+                            msg = event.get("message", "")
+                            logger.info(f"收到群消息 | type={type(msg).__name__} | msg={str(msg)[:200]}")
                         asyncio.create_task(handle_event(ws, event))
                     except json.JSONDecodeError as e:
                         logger.error(f"JSON 解析失败: {e}")

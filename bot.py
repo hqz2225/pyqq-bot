@@ -10,10 +10,54 @@ from config import VIOLATION_MUTE_THRESHOLD, WELCOME_MSG
 from plugins import sign_in, group_manage, violation
 
 
-def extract_plain_text(raw_message):
-    """提取纯文本 (去掉 CQ 码)"""
-    text = re.sub(r"\[CQ:[^\]]+\]", "", raw_message).strip()
-    return text
+def extract_plain_text(event):
+    """
+    提取纯文本, 兼容 字符串格式 和 数组格式
+    字符串格式: raw_message = "hello [CQ:at,qq=123]"
+    数组格式: message = [{"type":"text","data":{"text":"hello"}}, {"type":"at","data":{"qq":"123"}}]
+    """
+    message = event.get("message", "")
+    raw_message = event.get("raw_message", "")
+
+    # 字符串格式: raw_message 就是纯文本含 CQ 码
+    if isinstance(message, str) and message:
+        return re.sub(r"\[CQ:[^\]]+\]", "", message).strip()
+    if raw_message and isinstance(raw_message, str):
+        return re.sub(r"\[CQ:[^\]]+\]", "", raw_message).strip()
+
+    # 数组格式: message 是 list, 提取 text 类型的文本
+    if isinstance(message, list):
+        texts = []
+        for seg in message:
+            if isinstance(seg, dict) and seg.get("type") == "text":
+                data = seg.get("data", {})
+                texts.append(data.get("text", ""))
+        return "".join(texts).strip()
+
+    return ""
+
+
+def extract_at_target(event):
+    """
+    提取 @ 目标的 QQ 号, 兼容两种格式
+    """
+    # 字符串格式: [CQ:at,qq=123456]
+    raw_message = event.get("raw_message", "")
+    if isinstance(raw_message, str):
+        match = re.search(r"\[CQ:at,qq=(\d+)\]", raw_message)
+        if match:
+            return int(match.group(1))
+
+    # 数组格式: {"type":"at","data":{"qq":"123456"}}
+    message = event.get("message", "")
+    if isinstance(message, list):
+        for seg in message:
+            if isinstance(seg, dict) and seg.get("type") == "at":
+                data = seg.get("data", {})
+                qq = data.get("qq", "")
+                if qq and qq != "all":
+                    return int(qq)
+    return None
 
 
 HELP_TEXT = """
@@ -39,7 +83,6 @@ HELP_TEXT = """
 
 async def on_group_message(ws, event):
     """处理群消息"""
-    raw_message = event.get("raw_message", event.get("message", ""))
     group_id = event.get("group_id")
     user_id = event.get("user_id")
     sender = event.get("sender", {})
@@ -47,7 +90,7 @@ async def on_group_message(ws, event):
     sender_nickname = sender.get("nickname", str(user_id))
     message_id = event.get("message_id")
 
-    plain_text = extract_plain_text(raw_message)
+    plain_text = extract_plain_text(event)
 
     # ========== 1. 违禁词检测 (自动) ==========
     # 管理员和群主不受检测
@@ -119,10 +162,8 @@ async def on_group_message(ws, event):
 
     # --- 查违规 @用户 ---
     if cmd.startswith("查违规"):
-        # 提取 @ 的用户
-        match = re.search(r"\[CQ:at,qq=(\d+)\]", raw_message)
-        if match:
-            target_id = int(match.group(1))
+        target_id = extract_at_target(event)
+        if target_id:
             result = violation.get_violation_info(group_id, target_id)
         else:
             result = "请 @ 要查询的用户，例如: 查违规 @用户"
