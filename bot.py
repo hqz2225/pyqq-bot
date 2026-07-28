@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 
+import config
 from config import VIOLATION_MUTE_THRESHOLD, WELCOME_MSG, WELCOME_FILE, DATA_DIR
 from plugins import sign_in, group_manage, violation, exchange
 
@@ -130,6 +131,11 @@ async def on_group_message(ws, event):
     """处理群消息"""
     group_id = event.get("group_id")
     user_id = event.get("user_id")
+
+    # 自动记录群号 (用于更新通知)
+    if config.AUTO_GROUP_ID is None:
+        config.AUTO_GROUP_ID = group_id
+
     sender = event.get("sender", {})
     sender_role = sender.get("role", "member")
     sender_nickname = sender.get("nickname", str(user_id))

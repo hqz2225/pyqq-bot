@@ -12,7 +12,7 @@ import sys
 
 import websockets
 
-from config import WS_URL, NOTIFY_GROUP_IDS, UPDATE_CHECK_MINUTES, DATA_DIR
+from config import WS_URL, AUTO_GROUP_ID, UPDATE_CHECK_MINUTES, DATA_DIR
 from bot import handle_event
 from plugins.group_manage import send_group_msg
 
@@ -94,11 +94,12 @@ async def check_updates():
     while True:
         await asyncio.sleep(UPDATE_CHECK_MINUTES * 60)
 
-        if not NOTIFY_GROUP_IDS:
-            continue
-
         ws = _ws_ref[0]
         if ws is None:
+            continue
+
+        gid = AUTO_GROUP_ID
+        if gid is None:
             continue
 
         remote_hash = _get_remote_hash()
@@ -109,11 +110,10 @@ async def check_updates():
         if last_hash and remote_hash != last_hash:
             summary = _get_commit_summary()
             msg = f"检测到新版本更新!\n\n更新内容:\n{summary}\n\n发送 更新 即可升级"
-            for gid in NOTIFY_GROUP_IDS:
-                try:
-                    await send_group_msg(ws, gid, msg)
-                except Exception as e:
-                    logger.error(f"发送更新通知到群 {gid} 失败: {e}")
+            try:
+                await send_group_msg(ws, gid, msg)
+            except Exception as e:
+                logger.error(f"发送更新通知到群 {gid} 失败: {e}")
             _save_last_commit(remote_hash)
             logger.info(f"已发送更新通知, 新版本: {remote_hash[:8]}")
 

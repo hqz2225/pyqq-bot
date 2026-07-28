@@ -45,8 +45,8 @@ VIOLATION_MUTE_THRESHOLD = 3
 BANNED_WORD_IGNORE_CASE = True
 
 # ========== 版本更新通知 ==========
-# 通知到哪些群 (填群号)
-NOTIFY_GROUP_IDS = []
+# 自动检测群号 (机器人收到的第一条群消息自动记录, 无需手动填)
+AUTO_GROUP_ID = None
 
 # 检查更新间隔 (分钟)
 UPDATE_CHECK_MINUTES = 10
