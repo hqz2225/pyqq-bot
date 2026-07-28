@@ -2,7 +2,9 @@
 PyQQ Bot 核心逻辑
 中文命令路由 + 违禁词自动检测 + 入群欢迎
 """
+import os
 import re
+import subprocess
 
 from config import VIOLATION_MUTE_THRESHOLD, WELCOME_MSG
 from plugins import sign_in, group_manage, violation
@@ -22,9 +24,10 @@ HELP_TEXT = """
   排行      - 签到排行榜
   积分      - 查看我的积分
 
-  管理:
-  群信息    - 查看群信息 (仅群主/管理员)
-  查违规 @用户 - 查看用户违规记录 (仅群主/管理员)
+  管理 (仅群主/管理员):
+  群信息    - 查看群信息
+  查违规 @用户 - 查看用户违规记录
+  更新      - 从 GitHub 拉取最新代码并重启
 
   帮助      - 显示此菜单
 
@@ -124,6 +127,25 @@ async def on_group_message(ws, event):
         else:
             result = "请 @ 要查询的用户，例如: 查违规 @用户"
         await group_manage.send_group_msg(ws, group_id, result)
+        return
+
+    # --- 更新 ---
+    if cmd == "更新":
+        await group_manage.send_group_msg(ws, group_id, "正在拉取最新代码...")
+        try:
+            result = subprocess.run(
+                ["git", "pull"],
+                cwd=os.path.dirname(os.path.abspath(__file__)),
+                capture_output=True, text=True, timeout=30
+            )
+            output = result.stdout.strip() or result.stderr.strip()
+            await group_manage.send_group_msg(ws, group_id, f"更新结果:\n{output}\n\n即将重启，请稍等...")
+        except Exception as e:
+            await group_manage.send_group_msg(ws, group_id, f"更新失败: {e}")
+            return
+        # 退出进程，由 start.sh 自动重启
+        import sys
+        sys.exit(0)
         return
 
 
