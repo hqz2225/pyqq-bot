@@ -1,6 +1,7 @@
 """
 OneBot v11 HTTP API 调用模块
 通过 HTTP 调用 NapCat API, 避免 WebSocket 响应与事件消息串扰
+兼容 Python 3.8+ (不依赖 asyncio.to_thread)
 """
 import json
 import urllib.request
@@ -30,4 +31,5 @@ async def call_api(action, params):
             _logger.error(f"HTTP API 调用失败 [{action}]: {e}")
             return {"status": "failed", "retcode": -1, "error": str(e)}
 
-    return await asyncio.to_thread(_do)
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _do)
