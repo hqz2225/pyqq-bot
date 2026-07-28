@@ -15,6 +15,7 @@ import websockets
 from config import WS_URL, AUTO_GROUP_ID, UPDATE_CHECK_MINUTES, DATA_DIR, GIT_MIRROR
 from bot import handle_event
 from plugins.group_manage import send_group_msg
+from plugins.ws_conn import lock as _ws_lock
 
 # 日志配置
 logging.basicConfig(
@@ -27,9 +28,6 @@ logger = logging.getLogger("PyQQBot")
 # 重连配置
 RECONNECT_DELAY = 5
 MAX_RECONNECT_DELAY = 60
-
-# 共享 WebSocket 引用 (供更新检查器使用)
-_ws_ref = [None]
 
 # 记录上次 commit 的文件
 _LAST_COMMIT_FILE = os.path.join(DATA_DIR, "last_commit.txt")
@@ -54,7 +52,6 @@ def _get_remote_hash():
     """获取 origin/master 最新 commit hash, 失败返回 None"""
     try:
         base_dir = os.path.dirname(os.path.abspath(__file__))
-        # 获取 origin URL
         url_result = subprocess.run(
             ["git", "remote", "get-url", "origin"],
             capture_output=True, text=True, timeout=10,
@@ -65,13 +62,11 @@ def _get_remote_hash():
             mirror_url = GIT_MIRROR + remote_url
         else:
             mirror_url = remote_url
-        # 通过镜像 fetch
         subprocess.run(
             ["git", "fetch", mirror_url, "master"],
             capture_output=True, timeout=30,
             cwd=base_dir,
         )
-        # 获取 FETCH_HEAD 的 hash
         result = subprocess.run(
             ["git", "rev-parse", "FETCH_HEAD"],
             capture_output=True, text=True, timeout=10,
@@ -97,7 +92,6 @@ def _get_commit_summary():
 
 async def check_updates():
     """后台任务: 定期检查 GitHub 更新并通知"""
-    # 首次启动记录当前 commit, 不通知
     current = _get_remote_hash()
     if current and not _get_last_commit():
         _save_last_commit(current)
@@ -128,6 +122,8 @@ async def check_updates():
 
 async def connect_ws():
     """连接 NapCat WebSocket 并处理消息"""
+    import plugins.ws_conn as ws_conn
+
     delay = RECONNECT_DELAY
     logger.info(f"正在连接 NapCat WebSocket: {WS_URL}")
 
@@ -142,16 +138,22 @@ async def connect_ws():
             ) as ws:
                 logger.info("已成功连接到 NapCat WebSocket!")
                 delay = RECONNECT_DELAY
-                _ws_ref[0] = ws  # 更新共享引用
+                ws_conn.ws = ws
 
-                async for raw_message in ws:
-                    try:
-                        event = json.loads(raw_message)
-                        asyncio.create_task(handle_event(ws, event))
-                    except json.JSONDecodeError as e:
-                        logger.error(f"JSON 解析失败: {e}")
-                    except Exception as e:
-                        logger.error(f"处理事件异常: {e}")
+                # 主循环: 每次 recv 也加锁, 避免和 API 调用冲突
+                try:
+                    while True:
+                        async with _ws_lock:
+                            raw_message = await ws.recv()
+                        try:
+                            event = json.loads(raw_message)
+                            asyncio.create_task(handle_event(ws, event))
+                        except json.JSONDecodeError as e:
+                            logger.error(f"JSON 解析失败: {e}")
+                        except Exception as e:
+                            logger.error(f"处理事件异常: {e}")
+                except websockets.ConnectionClosed:
+                    raise
 
         except websockets.ConnectionClosed as e:
             logger.warning(f"WebSocket 连接关闭: {e}")
@@ -163,7 +165,7 @@ async def connect_ws():
         except Exception as e:
             logger.error(f"未知错误: {e}")
         finally:
-            _ws_ref[0] = None
+            ws_conn.ws = None
 
         logger.info(f"{delay} 秒后重连...")
         await asyncio.sleep(delay)
@@ -188,10 +190,7 @@ async def main():
         except NotImplementedError:
             signal.signal(sig, lambda s, f: stop_event.set())
 
-    # 启动 WebSocket 连接
     ws_task = asyncio.create_task(connect_ws())
-
-    # 启动更新检查器
     update_task = asyncio.create_task(check_updates())
 
     await stop_event.wait()
