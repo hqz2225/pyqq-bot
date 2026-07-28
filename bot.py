@@ -82,32 +82,43 @@ def set_welcome_msg(group_id, text):
     return f"入群欢迎消息已更新为:\n{text}"
 
 
+def format_welcome(msg_template, user_id):
+    """
+    格式化欢迎消息: 替换 /用户 和 {nickname} 为 @mention
+    例如: "欢迎/用户进群" → "欢迎[CQ:at,qq=xxx]进群"
+    """
+    at = f"[CQ:at,qq={user_id}]"
+    msg = msg_template.replace("{nickname}", at)
+    msg = msg.replace("/用户", at)
+    return msg
+
+
 HELP_TEXT = """
-  群管机器人 帮助菜单
+  群管机器人 帮助菜单 (命令前缀 / 可省略)
 
   签到系统:
-  签到      - 每日签到
-  排行      - 签到排行榜
-  积分      - 查看我的积分
+  /签到      - 每日签到
+  /排行      - 签到排行榜
+  /积分      - 查看我的积分
 
   积分兑换:
-  兑换      - 查看兑换列表
-  兑换 编号 - 兑换指定物品
+  /兑换      - 查看兑换列表
+  /兑换 编号 - 兑换指定物品
 
   管理 (仅群主/管理员):
-  群信息    - 查看群信息
-  查违规 @用户 - 查看用户违规记录
-  设置欢迎 消息  - 修改入群欢迎消息
-  查看欢迎  - 查看当前入群欢迎消息
+  /群信息    - 查看群信息
+  /查违规 @用户 - 查看用户违规记录
+  /设置欢迎 消息 - 修改入群欢迎消息 (支持 /用户 占位符, 如: 设置欢迎 欢迎/用户进群)
+  /查看欢迎  - 查看当前入群欢迎消息
 
   兑换管理 (仅群主/管理员):
-  添加兑换 名称 积分  - 添加兑换物品
-  删除兑换 编号     - 删除兑换物品
-  加积分 @用户 数量  - 给用户加积分
-  扣积分 @用户 数量  - 扣用户积分
-  更新      - 从 GitHub 拉取最新代码并重启
+  /添加兑换 名称 积分 - 添加兑换物品
+  /删除兑换 编号    - 删除兑换物品
+  /加积分 @用户 数量 - 给用户加积分
+  /扣积分 @用户 数量 - 扣用户积分
+  /更新      - 从 GitHub 拉取最新代码并重启
 
-  帮助      - 显示此菜单
+  /帮助      - 显示此菜单
 
   自动功能:
   违禁词检测 → 自动撤回 → 累计3次违规 → 禁言1天
@@ -136,12 +147,18 @@ async def on_group_message(ws, event):
                     group_id, user_id, sender_nickname, matched[0], plain_text
                 )
                 if should_mute:
-                    await group_manage.ban_user(ws, group_id, user_id, 86400)
-                    await group_manage.send_group_msg(
-                        ws, group_id,
-                        f"[CQ:at,qq={user_id}] 累计违规 {count} 次，已被禁言 1 天！\n"
-                        f"触发词: {matched[0]}"
-                    )
+                    banned = await group_manage.ban_user(ws, group_id, user_id, 86400)
+                    if banned:
+                        await group_manage.send_group_msg(
+                            ws, group_id,
+                            f"[CQ:at,qq={user_id}] 累计违规 {count} 次，已被禁言 1 天！\n"
+                            f"触发词: {matched[0]}"
+                        )
+                    else:
+                        await group_manage.send_group_msg(
+                            ws, group_id,
+                            f"[CQ:at,qq={user_id}] 累计违规 {count} 次，禁言失败 (可能机器人权限不足)"
+                        )
                 else:
                     await group_manage.send_group_msg(
                         ws, group_id,
@@ -154,7 +171,10 @@ async def on_group_message(ws, event):
     if not plain_text:
         return
 
+    # 去掉可选的 / 前缀
     cmd = plain_text.strip()
+    if cmd.startswith("/"):
+        cmd = cmd[1:].strip()
 
     # --- 签到 ---
     if cmd == "签到":
@@ -194,7 +214,7 @@ async def on_group_message(ws, event):
                 sign_in.get_score, sign_in.deduct_score
             )
         except ValueError:
-            result = "请输入正确的编号，例如: 兑换 1"
+            result = "请输入正确的编号，例如: /兑换 1"
         await group_manage.send_group_msg(ws, group_id, result)
         return
 
@@ -214,7 +234,7 @@ async def on_group_message(ws, event):
         if target_id:
             result = violation.get_violation_info(group_id, target_id)
         else:
-            result = "请 @ 要查询的用户，例如: 查违规 @用户"
+            result = "请 @ 要查询的用户，例如: /查违规 @用户"
         await group_manage.send_group_msg(ws, group_id, result)
         return
 
@@ -243,9 +263,9 @@ async def on_group_message(ws, event):
                 else:
                     result = exchange.add_item(group_id, name, price)
             except ValueError:
-                result = "格式: 添加兑换 名称 积分  例如: 添加兑换 管理员唱歌 100"
+                result = "格式: /添加兑换 名称 积分  例如: /添加兑换 管理员唱歌 100"
         else:
-            result = "格式: 添加兑换 名称 积分  例如: 添加兑换 管理员唱歌 100"
+            result = "格式: /添加兑换 名称 积分  例如: /添加兑换 管理员唱歌 100"
         await group_manage.send_group_msg(ws, group_id, result)
         return
 
@@ -255,7 +275,7 @@ async def on_group_message(ws, event):
             idx = int(cmd[5:].strip())
             result = exchange.remove_item(group_id, idx)
         except ValueError:
-            result = "请输入正确的编号，例如: 删除兑换 1"
+            result = "请输入正确的编号，例如: /删除兑换 1"
         await group_manage.send_group_msg(ws, group_id, result)
         return
 
@@ -269,9 +289,9 @@ async def on_group_message(ws, event):
                 new_score = sign_in.add_score(group_id, target_id, "", amount)
                 result = f"已为用户 {target_id} 增加 {amount} 积分，当前积分: {new_score}"
             except ValueError:
-                result = "格式: 加积分 @用户 数量"
+                result = "格式: /加积分 @用户 数量"
         else:
-            result = "格式: 加积分 @用户 数量"
+            result = "格式: /加积分 @用户 数量"
         await group_manage.send_group_msg(ws, group_id, result)
         return
 
@@ -285,9 +305,9 @@ async def on_group_message(ws, event):
                 new_score = sign_in.deduct_score(group_id, target_id, amount)
                 result = f"已为用户 {target_id} 扣除 {amount} 积分，当前积分: {new_score}"
             except ValueError:
-                result = "格式: 扣积分 @用户 数量"
+                result = "格式: /扣积分 @用户 数量"
         else:
-            result = "格式: 扣积分 @用户 数量"
+            result = "格式: /扣积分 @用户 数量"
         await group_manage.send_group_msg(ws, group_id, result)
         return
 
@@ -305,7 +325,6 @@ async def on_group_message(ws, event):
         except Exception as e:
             await group_manage.send_group_msg(ws, group_id, f"更新失败: {e}")
             return
-        # os._exit 立即终止进程，由 start.sh 重启
         os._exit(0)
         return
 
@@ -324,7 +343,5 @@ async def handle_event(ws, event):
         if notice_type == "group_increase":
             group_id = event.get("group_id")
             user_id = event.get("user_id")
-            welcome_msg = get_welcome_msg(group_id).replace(
-                "{nickname}", f"[CQ:at,qq={user_id}]"
-            )
-            await group_manage.send_group_msg(ws, group_id, welcome_msg)
+            msg = format_welcome(get_welcome_msg(group_id), user_id)
+            await group_manage.send_group_msg(ws, group_id, msg)

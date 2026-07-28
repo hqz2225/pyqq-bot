@@ -17,8 +17,8 @@ VIOLATION_FILE = "data/violation.json"
 WELCOME_FILE = "data/welcome.json"
 EXCHANGE_FILE = "data/exchange.json"
 
-# 入群欢迎模板 ({nickname} 会被替换为 @用户)
-WELCOME_MSG = "欢迎 {nickname} 加入本群！请遵守群规，文明交流~"
+# 入群欢迎模板 (/用户 或 {nickname} 会被替换为 @用户)
+WELCOME_MSG = "欢迎 /用户 加入本群！请遵守群规，文明交流~"
 
 # ========== 违禁词检测 ==========
 # 违禁词列表 (包含这些词的消息会被自动撤回)
