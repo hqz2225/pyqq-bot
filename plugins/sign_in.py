@@ -100,7 +100,7 @@ def get_my_score(group_id, user_id):
     data = _load_data()
     user_key = _get_user_key(group_id, user_id)
     if user_key not in data:
-        return "你还没有签到过哦~ 发送 /sign 开始签到吧！"
+        return "你还没有签到过哦~ 发送 签到 开始签到吧！"
     user = data[user_key]
     return (
         f"{user['nickname']} 的签到信息:\n"
@@ -108,3 +108,44 @@ def get_my_score(group_id, user_id):
         f"累计签到: {user['sign_count']} 天\n"
         f"上次签到: {user['last_sign_date']}"
     )
+
+
+def get_score(group_id, user_id):
+    """获取用户积分 (供兑换系统使用)"""
+    data = _load_data()
+    user_key = _get_user_key(group_id, user_id)
+    if user_key not in data:
+        return 0
+    return data[user_key]["total_score"]
+
+
+def deduct_score(group_id, user_id, amount):
+    """扣除积分, 返回剩余积分"""
+    data = _load_data()
+    user_key = _get_user_key(group_id, user_id)
+    if user_key not in data:
+        return 0
+    user = data[user_key]
+    user["total_score"] = max(0, user["total_score"] - amount)
+    _save_data(data)
+    return user["total_score"]
+
+
+def add_score(group_id, user_id, nickname, amount):
+    """增加积分, 返回新积分"""
+    data = _load_data()
+    user_key = _get_user_key(group_id, user_id)
+    if user_key not in data:
+        data[user_key] = {
+            "user_id": user_id,
+            "nickname": nickname,
+            "total_score": 0,
+            "last_sign_date": "",
+            "sign_count": 0,
+            "group_id": group_id,
+        }
+    user = data[user_key]
+    user["nickname"] = nickname
+    user["total_score"] = max(0, user["total_score"] + amount)
+    _save_data(data)
+    return user["total_score"]
