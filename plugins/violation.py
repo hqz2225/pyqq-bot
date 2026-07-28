@@ -1,9 +1,11 @@
 """
 违规追踪插件
 检测违禁词 → 自动撤回 → 累计违规 → 达到阈值自动禁言1天
+短词(≤3字符)独立匹配, 避免 "你妈吃饭了吗" 误判
 """
 import json
 import os
+import re
 from datetime import datetime, timezone, timedelta
 
 from config import (
@@ -36,6 +38,8 @@ def _key(group_id, user_id):
 def check_banned(msg_text):
     """
     检测消息是否包含违禁词
+    短词(≤3字符)需独立匹配, 不被中英文/数字包裹
+    例如: "你妈" 在 "你妈吃饭了吗" 中不触发, 在 "你妈!" 中触发
     返回: 匹配到的违禁词列表
     """
     if BANNED_WORD_IGNORE_CASE:
@@ -46,10 +50,21 @@ def check_banned(msg_text):
     matched = []
     for word in BANNED_WORDS:
         if BANNED_WORD_IGNORE_CASE:
-            if word.lower() in msg_lower:
+            word_lower = word.lower()
+        else:
+            word_lower = word
+
+        # 短词独立匹配: 前后不能是中英文或数字
+        if len(word) <= 3:
+            pattern = re.escape(word_lower)
+            if re.search(
+                r'(?<![a-zA-Z0-9\u4e00-\u9fff])' + pattern +
+                r'(?![a-zA-Z0-9\u4e00-\u9fff])',
+                msg_lower,
+            ):
                 matched.append(word)
         else:
-            if word in msg_text:
+            if word_lower in msg_lower:
                 matched.append(word)
     return matched
 

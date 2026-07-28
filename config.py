@@ -3,8 +3,12 @@ PyQQ Bot 配置文件
 连接 NapCat (Docker) 的 OneBot v11 WebSocket
 """
 
-# WebSocket 连接地址
+# WebSocket 连接地址 (仅用于接收事件)
 WS_URL = "ws://127.0.0.1:3001/?access_token=123456"
+
+# HTTP API 地址 (用于发送 API 请求, 避免 WebSocket 响应串扰)
+HTTP_URL = "http://127.0.0.1:3000"
+ACCESS_TOKEN = "123456"
 
 # 签到配置
 SIGN_IN_MIN = 1       # 签到最低积分

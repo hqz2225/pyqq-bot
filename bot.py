@@ -1,11 +1,13 @@
 """
 PyQQ Bot 核心逻辑
-中文命令路由 + 违禁词自动检测 + 入群欢迎 + 积分兑换
+中文命令路由 (必须以 / 开头) + 违禁词自动检测 + 入群欢迎 + 积分兑换
 """
+import asyncio
 import json
 import os
 import re
 import subprocess
+import sys
 
 import config
 from config import VIOLATION_MUTE_THRESHOLD, WELCOME_MSG, WELCOME_FILE, DATA_DIR, GIT_MIRROR
@@ -95,7 +97,7 @@ def format_welcome(msg_template, user_id):
 
 
 HELP_TEXT = """
-  群管机器人 帮助菜单 (命令前缀 / 可省略)
+  群管机器人 帮助菜单 (所有命令必须以 / 开头)
 
   签到系统:
   /签到      - 每日签到
@@ -109,7 +111,7 @@ HELP_TEXT = """
   管理 (仅群主/管理员):
   /群信息    - 查看群信息
   /查违规 @用户 - 查看用户违规记录
-  /设置欢迎 消息 - 修改入群欢迎消息 (支持 /用户 占位符, 如: 设置欢迎 欢迎/用户进群)
+  /设置欢迎 消息 - 修改入群欢迎消息 (支持 /用户 占位符, 如: /设置欢迎 欢迎/用户进群)
   /查看欢迎  - 查看当前入群欢迎消息
 
   兑换管理 (仅群主/管理员):
@@ -127,7 +129,7 @@ HELP_TEXT = """
 """.strip()
 
 
-async def on_group_message(ws, event):
+async def on_group_message(event):
     """处理群消息"""
     group_id = event.get("group_id")
     user_id = event.get("user_id")
@@ -143,72 +145,73 @@ async def on_group_message(ws, event):
 
     plain_text = extract_plain_text(event)
 
-    # ========== 1. 违禁词检测 (自动) ==========
+    # ========== 1. 违禁词检测 (自动, 不需要前缀) ==========
     if sender_role not in ("owner", "admin") and plain_text:
         matched = violation.check_banned(plain_text)
         if matched:
-            ok = await group_manage.delete_msg(ws, message_id)
-            if ok:
-                count, should_mute = violation.record_violation(
-                    group_id, user_id, sender_nickname, matched[0], plain_text
-                )
-                if should_mute:
-                    banned = await group_manage.ban_user(ws, group_id, user_id, 86400)
-                    if banned:
-                        await group_manage.send_group_msg(
-                            ws, group_id,
-                            f"[CQ:at,qq={user_id}] 累计违规 {count} 次，已被禁言 1 天！\n"
-                            f"触发词: {matched[0]}"
-                        )
-                    else:
-                        await group_manage.send_group_msg(
-                            ws, group_id,
-                            f"[CQ:at,qq={user_id}] 累计违规 {count} 次，禁言失败 (可能机器人权限不足)"
-                        )
+            # 先记录违规 (无论撤回是否成功)
+            count, should_mute = violation.record_violation(
+                group_id, user_id, sender_nickname, matched[0], plain_text
+            )
+            # 尝试撤回
+            await group_manage.delete_msg(message_id)
+            if should_mute:
+                banned = await group_manage.ban_user(group_id, user_id, 86400)
+                if banned:
+                    await group_manage.send_group_msg(
+                        group_id,
+                        f"[CQ:at,qq={user_id}] 累计违规 {count} 次，已被禁言 1 天！\n"
+                        f"触发词: {matched[0]}"
+                    )
                 else:
                     await group_manage.send_group_msg(
-                        ws, group_id,
-                        f"[CQ:at,qq={user_id}] 消息已撤回！检测到违禁词: {matched[0]}\n"
-                        f"累计违规 {count} 次 (满 {VIOLATION_MUTE_THRESHOLD} 次将禁言 1 天)"
+                        group_id,
+                        f"[CQ:at,qq={user_id}] 累计违规 {count} 次，禁言失败 (可能机器人权限不足)"
                     )
+            else:
+                await group_manage.send_group_msg(
+                    group_id,
+                    f"[CQ:at,qq={user_id}] 消息已撤回！检测到违禁词: {matched[0]}\n"
+                    f"累计违规 {count} 次 (满 {VIOLATION_MUTE_THRESHOLD} 次将禁言 1 天)"
+                )
             return
 
-    # ========== 2. 命令路由 ==========
+    # ========== 2. 命令路由 (必须以 / 开头) ==========
     if not plain_text:
         return
 
-    # 去掉可选的 / 前缀
-    cmd = plain_text.strip()
-    if cmd.startswith("/"):
-        cmd = cmd[1:].strip()
+    raw = plain_text.strip()
+    if not raw.startswith("/"):
+        return  # 不是命令, 忽略
+    cmd = raw[1:].strip()
 
     # --- 签到 ---
     if cmd == "签到":
         result = sign_in.do_sign_in(group_id, user_id, sender_nickname)
-        await group_manage.send_group_msg(ws, group_id, result)
+        await group_manage.send_group_msg(group_id, result)
         return
 
     # --- 排行 ---
     if cmd == "排行":
         result = sign_in.get_sign_rank(group_id)
-        await group_manage.send_group_msg(ws, group_id, result)
+        await group_manage.send_group_msg(group_id, result)
         return
 
     # --- 积分 ---
     if cmd == "积分":
         result = sign_in.get_my_score(group_id, user_id)
-        await group_manage.send_group_msg(ws, group_id, result)
+        await group_manage.send_group_msg(group_id, result)
         return
 
     # --- 帮助 ---
     if cmd == "帮助":
-        await group_manage.send_group_msg(ws, group_id, HELP_TEXT)
+        await group_manage.send_group_msg(group_id, HELP_TEXT)
         return
 
     # --- 兑换列表 ---
     if cmd == "兑换":
         result = exchange.list_items(group_id)
-        await group_manage.send_group_msg(ws, group_id, result)
+        await group_manage.send_group_msg(group_id, result)
         return
 
     # --- 兑换 编号 ---
@@ -221,7 +224,7 @@ async def on_group_message(ws, event):
             )
         except ValueError:
             result = "请输入正确的编号，例如: /兑换 1"
-        await group_manage.send_group_msg(ws, group_id, result)
+        await group_manage.send_group_msg(group_id, result)
         return
 
     # ========== 需要管理权限 ==========
@@ -230,8 +233,8 @@ async def on_group_message(ws, event):
 
     # --- 群信息 ---
     if cmd == "群信息":
-        result = await group_manage.get_group_info(ws, group_id)
-        await group_manage.send_group_msg(ws, group_id, result)
+        result = await group_manage.get_group_info(group_id)
+        await group_manage.send_group_msg(group_id, result)
         return
 
     # --- 查违规 @用户 ---
@@ -241,20 +244,20 @@ async def on_group_message(ws, event):
             result = violation.get_violation_info(group_id, target_id)
         else:
             result = "请 @ 要查询的用户，例如: /查违规 @用户"
-        await group_manage.send_group_msg(ws, group_id, result)
+        await group_manage.send_group_msg(group_id, result)
         return
 
     # --- 设置欢迎 ---
     if cmd.startswith("设置欢迎 "):
         new_msg = cmd[5:].strip()
         result = set_welcome_msg(group_id, new_msg)
-        await group_manage.send_group_msg(ws, group_id, result)
+        await group_manage.send_group_msg(group_id, result)
         return
 
     # --- 查看欢迎 ---
     if cmd == "查看欢迎":
         msg = get_welcome_msg(group_id)
-        await group_manage.send_group_msg(ws, group_id, f"当前入群欢迎消息:\n{msg}")
+        await group_manage.send_group_msg(group_id, f"当前入群欢迎消息:\n{msg}")
         return
 
     # --- 添加兑换 名称 积分 ---
@@ -272,7 +275,7 @@ async def on_group_message(ws, event):
                 result = "格式: /添加兑换 名称 积分  例如: /添加兑换 管理员唱歌 100"
         else:
             result = "格式: /添加兑换 名称 积分  例如: /添加兑换 管理员唱歌 100"
-        await group_manage.send_group_msg(ws, group_id, result)
+        await group_manage.send_group_msg(group_id, result)
         return
 
     # --- 删除兑换 编号 ---
@@ -282,7 +285,7 @@ async def on_group_message(ws, event):
             result = exchange.remove_item(group_id, idx)
         except ValueError:
             result = "请输入正确的编号，例如: /删除兑换 1"
-        await group_manage.send_group_msg(ws, group_id, result)
+        await group_manage.send_group_msg(group_id, result)
         return
 
     # --- 加积分 @用户 数量 ---
@@ -298,7 +301,7 @@ async def on_group_message(ws, event):
                 result = "格式: /加积分 @用户 数量"
         else:
             result = "格式: /加积分 @用户 数量"
-        await group_manage.send_group_msg(ws, group_id, result)
+        await group_manage.send_group_msg(group_id, result)
         return
 
     # --- 扣积分 @用户 数量 ---
@@ -314,26 +317,23 @@ async def on_group_message(ws, event):
                 result = "格式: /扣积分 @用户 数量"
         else:
             result = "格式: /扣积分 @用户 数量"
-        await group_manage.send_group_msg(ws, group_id, result)
+        await group_manage.send_group_msg(group_id, result)
         return
 
     # --- 更新 ---
     if cmd == "更新":
-        await group_manage.send_group_msg(ws, group_id, "正在拉取最新代码...")
+        await group_manage.send_group_msg(group_id, "正在拉取最新代码...")
         try:
             base_dir = os.path.dirname(os.path.abspath(__file__))
-            # 先获取远程仓库 URL
             url_result = subprocess.run(
                 ["git", "remote", "get-url", "origin"],
                 cwd=base_dir, capture_output=True, text=True, timeout=10
             )
             remote_url = url_result.stdout.strip()
-            # 拼接镜像 URL
             if GIT_MIRROR and remote_url:
                 mirror_url = GIT_MIRROR + remote_url
             else:
                 mirror_url = remote_url
-            # 通过镜像 fetch 并 merge
             subprocess.run(
                 ["git", "fetch", mirror_url, "master"],
                 cwd=base_dir, capture_output=True, text=True, timeout=60
@@ -343,11 +343,13 @@ async def on_group_message(ws, event):
                 cwd=base_dir, capture_output=True, text=True, timeout=30
             )
             output = merge_result.stdout.strip() or merge_result.stderr.strip()
-            await group_manage.send_group_msg(ws, group_id, f"更新结果:\n{output}\n\n即将重启，请稍等...")
+            await group_manage.send_group_msg(group_id, f"更新结果:\n{output}\n\n正在重启...")
+            await asyncio.sleep(0.5)
         except Exception as e:
-            await group_manage.send_group_msg(ws, group_id, f"更新失败: {e}")
+            await group_manage.send_group_msg(group_id, f"更新失败: {e}")
             return
-        os._exit(0)
+        # 原地重启: 用新进程替换当前进程
+        os.execv(sys.executable, [sys.executable] + sys.argv)
         return
 
 
@@ -358,7 +360,7 @@ async def handle_event(ws, event):
     if post_type == "message":
         message_type = event.get("message_type")
         if message_type == "group":
-            await on_group_message(ws, event)
+            await on_group_message(event)
 
     elif post_type == "notice":
         notice_type = event.get("notice_type")
@@ -366,4 +368,4 @@ async def handle_event(ws, event):
             group_id = event.get("group_id")
             user_id = event.get("user_id")
             msg = format_welcome(get_welcome_msg(group_id), user_id)
-            await group_manage.send_group_msg(ws, group_id, msg)
+            await group_manage.send_group_msg(group_id, msg)

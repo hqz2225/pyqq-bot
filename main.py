@@ -106,10 +106,6 @@ async def check_updates():
     while True:
         await asyncio.sleep(UPDATE_CHECK_MINUTES * 60)
 
-        ws = _ws_ref[0]
-        if ws is None:
-            continue
-
         gid = AUTO_GROUP_ID
         if gid is None:
             continue
@@ -121,9 +117,9 @@ async def check_updates():
         last_hash = _get_last_commit()
         if last_hash and remote_hash != last_hash:
             summary = _get_commit_summary()
-            msg = f"检测到新版本更新!\n\n更新内容:\n{summary}\n\n发送 更新 即可升级"
+            msg = f"检测到新版本更新!\n\n更新内容:\n{summary}\n\n发送 /更新 即可升级"
             try:
-                await send_group_msg(ws, gid, msg)
+                await send_group_msg(gid, msg)
             except Exception as e:
                 logger.error(f"发送更新通知到群 {gid} 失败: {e}")
             _save_last_commit(remote_hash)
