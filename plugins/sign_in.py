@@ -7,7 +7,7 @@ import os
 import random
 from datetime import datetime, timezone, timedelta
 
-from config import SIGN_IN_MIN, SIGN_IN_MAX, SIGN_IN_RESET_HOUR, DATA_DIR, SIGN_IN_FILE
+from config import SIGN_IN_MIN, SIGN_IN_MAX, DATA_DIR, SIGN_IN_FILE
 
 # 北京时间时区
 TZ = timezone(timedelta(hours=8))
