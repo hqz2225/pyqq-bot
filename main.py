@@ -93,7 +93,7 @@ async def main():
     ws_task = asyncio.create_task(connect_ws())
 
     # 等待退出信号
-    await stop_event
+    await stop_event.wait()
     ws_task.cancel()
     try:
         await ws_task
