@@ -2,11 +2,15 @@
 PyQQ Bot 核心逻辑
 中文命令路由 (必须以 / 开头) + 违禁词自动检测 + 入群欢迎 + 积分兑换
 """
+import asyncio
 import json
 import os
 import re
+import subprocess
+import sys
 
-from config import VIOLATION_MUTE_THRESHOLD, WELCOME_MSG, WELCOME_FILE, DATA_DIR
+import config
+from config import VIOLATION_MUTE_THRESHOLD, WELCOME_MSG, WELCOME_FILE, DATA_DIR, GIT_MIRROR
 from plugins import sign_in, group_manage, violation, exchange
 
 
@@ -115,6 +119,7 @@ HELP_TEXT = """
   /删除兑换 编号    - 删除兑换物品
   /加积分 @用户 数量 - 给用户加积分
   /扣积分 @用户 数量 - 扣用户积分
+  /更新      - 从 GitHub 拉取最新代码并重启
 
   /帮助      - 显示此菜单
 
@@ -128,6 +133,11 @@ async def on_group_message(event):
     """处理群消息"""
     group_id = event.get("group_id")
     user_id = event.get("user_id")
+
+    # 自动记录群号 (用于更新通知)
+    if config.AUTO_GROUP_ID is None:
+        config.AUTO_GROUP_ID = group_id
+
     sender = event.get("sender", {})
     sender_role = sender.get("role", "member")
     sender_nickname = sender.get("nickname", str(user_id))
@@ -308,6 +318,37 @@ async def on_group_message(event):
         else:
             result = "格式: /扣积分 @用户 数量"
         await group_manage.send_group_msg(group_id, result)
+        return
+
+    # --- 更新 ---
+    if cmd == "更新":
+        await group_manage.send_group_msg(group_id, "正在拉取最新代码...")
+        try:
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            url_result = subprocess.run(
+                ["git", "remote", "get-url", "origin"],
+                cwd=base_dir, capture_output=True, text=True, timeout=10
+            )
+            remote_url = url_result.stdout.strip()
+            if GIT_MIRROR and remote_url:
+                mirror_url = GIT_MIRROR + remote_url
+            else:
+                mirror_url = remote_url
+            subprocess.run(
+                ["git", "fetch", mirror_url, "master"],
+                cwd=base_dir, capture_output=True, text=True, timeout=60
+            )
+            merge_result = subprocess.run(
+                ["git", "merge", "FETCH_HEAD", "--ff-only"],
+                cwd=base_dir, capture_output=True, text=True, timeout=30
+            )
+            output = merge_result.stdout.strip() or merge_result.stderr.strip()
+            await group_manage.send_group_msg(group_id, f"更新结果:\n{output}\n\n正在重启...")
+            await asyncio.sleep(0.5)
+        except Exception as e:
+            await group_manage.send_group_msg(group_id, f"更新失败: {e}")
+            return
+        os.execv(sys.executable, [sys.executable] + sys.argv)
         return
 
 

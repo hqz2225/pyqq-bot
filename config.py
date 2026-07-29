@@ -43,3 +43,13 @@ VIOLATION_MUTE_THRESHOLD = 3
 
 # 违禁词检测时是否忽略大小写
 BANNED_WORD_IGNORE_CASE = True
+
+# ========== 版本更新 ==========
+# 自动检测群号 (机器人收到的第一条群消息自动记录, 无需手动填)
+AUTO_GROUP_ID = None
+
+# GitHub 镜像 (国内加速用, 留空则直连)
+GIT_MIRROR = "https://mirror.ghproxy.com/"
+
+# 检查更新间隔 (分钟)
+UPDATE_CHECK_MINUTES = 10
