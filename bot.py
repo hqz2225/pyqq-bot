@@ -148,10 +148,13 @@ async def on_group_message(event):
     # ========== 1. 违禁词检测 (自动, 不需要前缀) ==========
     if sender_role not in ("owner", "admin") and plain_text:
         matched = violation.check_banned(plain_text)
-        if matched:
+        ad_type = violation.check_ad(plain_text)
+        reason = matched[0] if matched else (ad_type if ad_type else None)
+
+        if reason:
             # 先记录违规 (无论撤回是否成功)
             count, should_mute = violation.record_violation(
-                group_id, user_id, sender_nickname, matched[0], plain_text
+                group_id, user_id, sender_nickname, reason, plain_text
             )
             # 尝试撤回
             await group_manage.delete_msg(message_id)
@@ -161,7 +164,7 @@ async def on_group_message(event):
                     await group_manage.send_group_msg(
                         group_id,
                         f"[CQ:at,qq={user_id}] 累计违规 {count} 次，已被禁言 1 天！\n"
-                        f"触发词: {matched[0]}"
+                        f"触发: {reason}"
                     )
                 else:
                     await group_manage.send_group_msg(
@@ -171,7 +174,7 @@ async def on_group_message(event):
             else:
                 await group_manage.send_group_msg(
                     group_id,
-                    f"[CQ:at,qq={user_id}] 消息已撤回！检测到违禁词: {matched[0]}\n"
+                    f"[CQ:at,qq={user_id}] 消息已撤回！检测到{reason}\n"
                     f"累计违规 {count} 次 (满 {VIOLATION_MUTE_THRESHOLD} 次将禁言 1 天)"
                 )
             return

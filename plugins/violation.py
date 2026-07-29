@@ -11,6 +11,8 @@ from datetime import datetime, timezone, timedelta
 from config import (
     BANNED_WORDS, BANNED_WORD_IGNORE_CASE,
     VIOLATION_MUTE_THRESHOLD, VIOLATION_FILE, DATA_DIR,
+    AD_DETECT_ENABLED, AD_DETECT_URL, AD_DETECT_QQ,
+    AD_DETECT_WECHAT, AD_DETECT_PHONE,
 )
 
 TZ = timezone(timedelta(hours=8))
@@ -67,6 +69,41 @@ def check_banned(msg_text):
             if word_lower in msg_lower:
                 matched.append(word)
     return matched
+
+
+def check_ad(msg_text):
+    """
+    检测消息是否包含广告特征
+    返回: 匹配到的广告类型描述, 无广告返回 None
+    """
+    if not AD_DETECT_ENABLED:
+        return None
+
+    # 链接检测: http/https/ftp
+    if AD_DETECT_URL:
+        if re.search(r'https?://\S+|ftp://\S+', msg_text, re.IGNORECASE):
+            return "广告链接"
+
+    # QQ号检测: 5-11位数字, 前后非数字, 且不在URL中
+    if AD_DETECT_QQ:
+        qq_match = re.search(r'(?<!\d)\d{5,11}(?!\d)', msg_text)
+        if qq_match:
+            qq = qq_match.group()
+            # 排除: 纯数字日期(20260729)、价格(10000)、短id在URL中
+            if not re.search(r'https?://.*' + qq, msg_text, re.IGNORECASE):
+                return f"广告QQ号({qq})"
+
+    # 微信号检测: wx / wxid / VX / vx / 微信 等 + 字母数字组合
+    if AD_DETECT_WECHAT:
+        if re.search(r'(?i)(wx|wxid|vx|微信)\s*[:：]?\s*[a-z0-9_-]{5,}', msg_text):
+            return "广告微信号"
+
+    # 手机号检测: 1开头11位数字
+    if AD_DETECT_PHONE:
+        if re.search(r'(?<!\d)1[3-9]\d{9}(?!\d)', msg_text):
+            return "广告手机号"
+
+    return None
 
 
 def record_violation(group_id, user_id, nickname, word, msg_text):

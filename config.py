@@ -44,6 +44,22 @@ VIOLATION_MUTE_THRESHOLD = 3
 # 违禁词检测时是否忽略大小写
 BANNED_WORD_IGNORE_CASE = True
 
+# ========== 广告检测 ==========
+# 广告检测开关 (True=开启, False=关闭)
+AD_DETECT_ENABLED = True
+
+# 广告检测: 链接 (http/https/ftp)
+AD_DETECT_URL = True
+
+# 广告检测: QQ号 (5-11位数字, 前后非数字)
+AD_DETECT_QQ = True
+
+# 广告检测: 微信号 (wx/wxid/VX等模式)
+AD_DETECT_WECHAT = True
+
+# 广告检测: 手机号 (11位, 1开头)
+AD_DETECT_PHONE = True
+
 # ========== 版本更新 ==========
 # 自动检测群号 (机器人收到的第一条群消息自动记录, 无需手动填)
 AUTO_GROUP_ID = None
