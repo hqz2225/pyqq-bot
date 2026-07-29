@@ -12,7 +12,7 @@ import websockets
 
 from config import WS_URL
 from bot import handle_event
-from plugins.ws_conn import lock as _ws_lock
+from plugins import ws_conn
 
 # 日志配置
 logging.basicConfig(
@@ -29,7 +29,6 @@ MAX_RECONNECT_DELAY = 60
 
 async def connect_ws():
     """连接 NapCat WebSocket 并处理消息"""
-    import plugins.ws_conn as ws_conn
 
     delay = RECONNECT_DELAY
     logger.info(f"正在连接 NapCat WebSocket: {WS_URL}")
@@ -46,11 +45,12 @@ async def connect_ws():
                 logger.info("已成功连接到 NapCat WebSocket!")
                 delay = RECONNECT_DELAY
                 ws_conn.ws = ws
+                ws_conn.lock = asyncio.Lock()  # 每次连接重建锁, 绑定当前事件循环
 
                 # 主循环: 每次 recv 也加锁, 避免和 API 调用冲突
                 try:
                     while True:
-                        async with _ws_lock:
+                        async with ws_conn.lock:
                             raw_message = await ws.recv()
                         try:
                             event = json.loads(raw_message)
@@ -73,6 +73,7 @@ async def connect_ws():
             logger.error(f"未知错误: {e}")
         finally:
             ws_conn.ws = None
+            ws_conn.lock = None
 
         logger.info(f"{delay} 秒后重连...")
         await asyncio.sleep(delay)

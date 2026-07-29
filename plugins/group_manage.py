@@ -6,21 +6,20 @@
 import json
 import logging
 
-from plugins.ws_conn import ws as _ws_ref, lock as _ws_lock
+from plugins import ws_conn
 
 _logger = logging.getLogger("PyQQBot")
 
 
 async def delete_msg(message_id):
     """撤回消息"""
-    async with _ws_lock:
-        ws = _ws_ref
+    async with ws_conn.lock:
         payload = {
             "action": "delete_msg",
             "params": {"message_id": message_id},
         }
-        await ws.send(json.dumps(payload))
-        resp = await ws.recv()
+        await ws_conn.ws.send(json.dumps(payload))
+        resp = await ws_conn.ws.recv()
         result = json.loads(resp)
         ok = result.get("status") == "ok"
         if not ok:
@@ -30,8 +29,7 @@ async def delete_msg(message_id):
 
 async def ban_user(group_id, user_id, duration_seconds):
     """禁言用户 duration_seconds 秒, 0 表示解禁"""
-    async with _ws_lock:
-        ws = _ws_ref
+    async with ws_conn.lock:
         payload = {
             "action": "set_group_ban",
             "params": {
@@ -40,8 +38,8 @@ async def ban_user(group_id, user_id, duration_seconds):
                 "duration": duration_seconds,
             },
         }
-        await ws.send(json.dumps(payload))
-        resp = await ws.recv()
+        await ws_conn.ws.send(json.dumps(payload))
+        resp = await ws_conn.ws.recv()
         result = json.loads(resp)
         ok = result.get("status") == "ok"
         if not ok:
@@ -51,14 +49,13 @@ async def ban_user(group_id, user_id, duration_seconds):
 
 async def get_group_info(group_id):
     """获取群信息"""
-    async with _ws_lock:
-        ws = _ws_ref
+    async with ws_conn.lock:
         payload = {
             "action": "get_group_info",
             "params": {"group_id": group_id, "no_cache": False},
         }
-        await ws.send(json.dumps(payload))
-        resp = await ws.recv()
+        await ws_conn.ws.send(json.dumps(payload))
+        resp = await ws_conn.ws.recv()
         result = json.loads(resp)
         if result.get("status") == "ok":
             data = result["data"]
@@ -72,8 +69,7 @@ async def get_group_info(group_id):
 
 async def send_group_msg(group_id, message):
     """发送群消息"""
-    async with _ws_lock:
-        ws = _ws_ref
+    async with ws_conn.lock:
         payload = {
             "action": "send_group_msg",
             "params": {
@@ -81,8 +77,8 @@ async def send_group_msg(group_id, message):
                 "message": str(message),
             },
         }
-        await ws.send(json.dumps(payload))
-        resp = await ws.recv()
+        await ws_conn.ws.send(json.dumps(payload))
+        resp = await ws_conn.ws.recv()
         result = json.loads(resp)
         ok = result.get("status") == "ok"
         if not ok:
